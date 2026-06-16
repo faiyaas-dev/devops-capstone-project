@@ -1,18 +1,67 @@
-name: Notify Profile Update
+name: Update Profile README from Project
 
 on:
-  push:
-    branches:
-      - main
+  repository_dispatch:
+    types: [project_update]
 
 jobs:
-  ping-profile:
+  update-readme:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch Event to Profile Repo
+      - name: Checkout Profile Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Safely Inject Content via Event JSON
         run: |
-          curl -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
-               -H "Accept: application/vnd.github.v3+json" \
-               X POST \
-               -d "{\"event_type\": \"project_update\", \"client_payload\": {\"commit_msg\": \"${{ github.event.head_commit.message }}\", \"sha\": \"${{ github.sha }}\"}}" \
-               https://api.github.com/repos/faiyaas-dev/faiyaas-dev/dispatches
+          python -c "
+          import os
+          import json
+          import re
+          from datetime import datetime
+
+          # Read payload directly from file to prevent quote escaping syntax bugs
+          with open(os.environ['GITHUB_EVENT_PATH'], 'r') as f:
+              event_data = json.load(f)
+
+          payload = event_data.get('client_payload', {})
+          commit_msg = payload.get('commit_msg', 'Update').split('\n')[0] # Get first line only
+          sha = payload.get('sha', '')[:7]
+          now = datetime.now().strftime('%Y-%m-%d %H:%M IST')
+
+          new_content = f'''### 🎬 Netflix Clone — DevSecOps Platform
+          *End-to-end DevOps capstone. Real infra, real pipeline, real observability.*
+
+          | Metric | Details |
+          | :--- | :--- |
+          | **Pipeline Status** | ![CI/CD Pipeline](https://github.com/faiyaas-dev/devops-capstone-project/actions/workflows/main-pipeline.yml/badge.svg) |
+          | **Current Focus** | Building CI Pipeline (Trivy scan → SonarCloud → Build → Push) |
+          | **Deployment Status** | 🟡 k3s Cluster Provisioned (DigitalOcean BLR1) |
+          | **Last Updated** | {now} |
+          | **Latest Commit** | [`{sha}`](https://github.com/faiyaas-dev/devops-capstone-project/commit/{sha}) - {commit_msg} |
+
+          #### 🏗️ Architecture Stack
+          \`k3s\` • \`DigitalOcean\` • \`Terraform\` • \`ArgoCD\` • \`GitHub Actions\` • \`Trivy\` • \`SonarCloud\` • \`Prometheus/Grafana\`
+          '''
+
+          with open('README.md', 'r') as file:
+              readme = file.read()
+
+          pattern = r'.*?'
+          updated_readme = re.sub(pattern, new_content, readme, flags=re.DOTALL)
+
+          with open('README.md', 'w') as file:
+              file.write(updated_readme)
+          "
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: sync capstone project milestone [skip ci]" || exit 0
+          git push
